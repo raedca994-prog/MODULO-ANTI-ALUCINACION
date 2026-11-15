@@ -12,61 +12,89 @@ PRINCIPIO DE INVARIANZA -SIN DELIRIOS .SIN ROLSIN SIMULACION.
 ## ¿Para qué sirve?
 Sirve para **IAs y para Agentes**.
 
-**Para IAs / Chatbots:** Filtra antes de mostrar la respuesta. Si es corta o tiene patrón raro, la frena.
+"""Módulo Anti-Alucinación y Auditoría de Integridad.
 
-**Para Agentes:** Audita toda la cadena de pasos. Si un paso se corrompe, se detecta al instante.
+Autor original: Eduardo Cáceres.
+"""
 
-> IA = 1 respuesta validada
-> Agente = TODA la cadena auditada
+from collections.abc import Mapping
+import hashlib
+import json
+import re
+from typing import Any
 
-## El Código
-```python
-def validate_output(self, response_text: str) -> tuple[bool, str]:
-    if self.pattern.search(response_text):
-        return False, "Alerta: Patrón restringido detectado."
-    if len(response_text.split()) < 5:
-        return False, "Error: Insuficiencia técnica."
-    return True, "Validado"
 
-def audit_process(self, current_data: dict) -> str:
-    try:
-        data_str = json.dumps(current_data, sort_keys=True)
-        return hashlib.sha256(data_str.encode()).hexdigest()
-    except TypeError as e:
-        return f"Error de integridad: {str(e)}"
+class IntegrityAuditError(ValueError):
+  """Excepción específica para fallos de serialización o integridad."""
 
-Antídoto contra la Ley de Goodhart
-"Cuando una medida se convierte en un objetivo, deja de ser una buena medida"La IA normal alucina para cumplir la métrica de "parecer coherente".
-1. Desacoplamiento: La IA no puede engañar al filtro. Cambia el objetivo de generar cantidad a generar calidad verificable.
-2. Prevención de optimización perversa: validate_output es el ancla de realidad.
-3. Hash como verdad absoluta: audit_process con SHA-256 es objetivo e inmutable. Si cambia el dato, cambia el hash.
-No es una máquina de cumplir métricas, es una máquina de producir resultados verificables.Regalo del autor
-Este código es un regalo de Eduardo Cáceres para todos. Libre para usar, probar y mejorar. Si lo usás, citá al autor.javascript
-4. Apretá **Commit changes** verde abajo.
-
-### PASO 2: CREAR EL `main.py`
-
-1. Volvé arriba, apretá **Agregar archivo** -> **Crear nuevo archivo**
-2. Nombre: `main.py`
-3. Pegás este código y apretá Commit:
-
-```python
-import re, json, hashlib
 
 class ModuloAntiAlucinacion:
-    def __init__(self):
-        self.pattern = re.compile(r"(como IA|como modelo|simulando|fingiendo)", re.IGNORECASE)
-    def validate_output(self, response_text: str):
-        if self.pattern.search(response_text):
-            return False, "Alerta: Patron restringido detectado."
-        if len(response_text.split()) < 5:
-            return False, "Error: Insuficiencia tecnica."
-        return True, "Validado"
-    def audit_process(self, current_data: dict):
-        data_str = json.dumps(current_data, sort_keys=True)
-        return hashlib.sha256(data_str.encode()).hexdigest()
+  MIN_WORDS: int = 5
 
-# Prueba
-modulo = ModuloAntiAlucinacion()
-print(modulo.validate_output("Este es un resultado tecnico verificable y real"))
-print(modulo.audit_process({"paso": 1, "estado": "ok"}))
+  def __init__(self) -> None:
+    self.pattern: re.Pattern[str] = re.compile(
+        r"\b("
+        r"como (?:una? )?(?:IA|inteligencia artificial|modelo(?: de lenguaje)?)"
+        r"|simulando|fingiendo"
+        r")\b",
+        re.IGNORECASE,
+    )
+
+  def validate_output(self, response_text: str) -> tuple[bool, str]:
+    if not isinstance(response_text, str) or not response_text.strip():
+      return False, "Error: Respuesta vacía o inválida."
+
+    if self.pattern.search(response_text):
+      return False, "Alerta: Patrón restringido detectado."
+
+    if len(response_text.split(None, self.MIN_WORDS)) < self.MIN_WORDS:
+      return False, "Error: Insuficiencia técnica."
+
+    return True, "Validado"
+
+  @staticmethod
+  def _canonicalize(obj: Any) -> Any:
+    """Normaliza tipos no nativos JSON de forma determinista."""
+    if isinstance(obj, set):
+      return sorted(
+          (ModuloAntiAlucinacion._canonicalize(x) for x in obj), key=str
+      )
+    if isinstance(obj, Mapping):
+      return {
+          str(k): ModuloAntiAlucinacion._canonicalize(v)
+          for k, v in obj.items()
+      }
+    if isinstance(obj, (list, tuple)):
+      return [ModuloAntiAlucinacion._canonicalize(x) for x in obj]
+    return obj
+
+  def audit_process(self, current_data: Mapping[str, Any]) -> str:
+    if not isinstance(current_data, Mapping):
+      raise IntegrityAuditError(
+          "Se esperaba un Mapping/dict, se recibió"
+          f" {type(current_data).__name__}."
+      )
+
+    try:
+      normalized = self._canonicalize(current_data)
+      data_str = json.dumps(
+          normalized,
+          sort_keys=True,
+          ensure_ascii=False,
+          separators=(",", ":"),
+          default=str,
+      )
+      return hashlib.sha256(data_str.encode("utf-8")).hexdigest()
+    except Exception as exc:
+      raise IntegrityAuditError(
+          f"Fallo al serializar los datos de auditoría: {exc}"
+      ) from exc
+
+
+if __name__ == "__main__":
+  modulo = ModuloAntiAlucinacion()
+  print(
+      modulo.validate_output("Este es un resultado técnico verificable y real")
+  )
+  print(modulo.audit_process({"paso": 1, "estado": "ok", "tags": {"b", "a"}}))
+ 
